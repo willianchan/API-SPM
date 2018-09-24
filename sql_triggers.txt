@@ -1,0 +1,11 @@
+CREATE TRIGGER `EntradaCarroBolsao` BEFORE INSERT ON `tbl_bolsao` FOR EACH ROW UPDATE tbl_atual SET tbl_atual.vagas_ocupadas = tbl_atual.vagas_ocupadas + 1 WHERE tbl_atual.idbp = new.idbolsao AND new.acao = "entrada"
+CREATE TRIGGER `SaidaCarroBolsao` AFTER INSERT ON `tbl_bolsao` FOR EACH ROW UPDATE tbl_atual SET tbl_atual.vagas_ocupadas = tbl_atual.vagas_ocupadas - 1 WHERE tbl_atual.idbp = new.idbolsao AND new.acao = "saida"
+
+CREATE TRIGGER `EntradaCarroPortaria` BEFORE INSERT ON `tbl_portaria` FOR EACH ROW UPDATE tbl_atual SET tbl_atual.vagas_ocupadas = tbl_atual.vagas_ocupadas + 1 WHERE tbl_atual.idbp = new.idportaria AND new.acao = "entrada"
+CREATE TRIGGER `SaidaCarroPortaria` AFTER INSERT ON `tbl_portaria` FOR EACH ROW UPDATE tbl_atual SET tbl_atual.vagas_ocupadas = tbl_atual.vagas_ocupadas - 1 WHERE tbl_atual.idbp = new.idportaria AND new.acao = "saida"
+
+UPDATE tbl_atual SET tbl_atual.vagas_ocupadas = tbl_atual.vagas_ocupadas + 1 WHERE tbl_atual.idbp = new.idbolsao AND new.acao = "entrada"
+UPDATE tbl_atual SET tbl_atual.vagas_ocupadas = tbl_atual.vagas_ocupadas + 1 WHERE tbl_atual.idbp = new.idbolsao AND new.acao = "entrada"
+
+UPDATE tbl_atual SET tbl_atual.vagas_ocupadas = tbl_atual.vagas_ocupadas + 1 WHERE tbl_atual.idbp = new.idportaria AND new.acao = "entrada"
+UPDATE tbl_atual SET tbl_atual.vagas_ocupadas = tbl_atual.vagas_ocupadas - 1 WHERE tbl_atual.idbp = new.idportaria AND new.acao = "saida"

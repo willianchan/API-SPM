@@ -1,0 +1,8 @@
+{
+  "estacionamentos": [
+    { "name": "Portão Principal", "id": 1 },
+    { "name": "Divisão de Motores", "id": 2 },
+    { "name": "Bolsão H", "id": 3 },
+    { "name": "Bolsão U", "id": 4 }
+  ]
+}
