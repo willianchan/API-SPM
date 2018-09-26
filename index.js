@@ -2,10 +2,9 @@ const mysql = require('mysql');
 const express = require('express');
 const bodyParser = require('body-parser');
 
+const port = 8080;
+
 const app = express();
-// parse application/x-www-form-urlencoded
-//app.use(bodyParser.urlencoded({ extended: false }))
-// parse application/json
 app.use(bodyParser.json());
 
 //Database connection
@@ -17,25 +16,25 @@ var connection = mysql.createConnection({
 });
 connection.connect();
 
-//Funcoes
-function LastIndexOfInterval(num, lista) {
-  for (i = 0; i < 5; i++) {
-    if ((x = lista.lastIndexOf(num - i)) != -1) {
-      return x;
-    }
-  }
-  return -1;
+//FUNCOES
+Date.prototype.getWeek = function() {
+  var date = new Date(this.getTime());
+   date.setHours(0, 0, 0, 0);
+  // Thursday in current week decides the year.
+  date.setDate(date.getDate() + 3 - (date.getDay() + 6) % 7);
+  // January 4 is always in week 1.
+  var week1 = new Date(date.getFullYear(), 0, 4);
+  // Adjust to Thursday in week 1 and count number of weeks from date to week1.
+  return 1 + Math.round(((date.getTime() - week1.getTime()) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
 }
 
-Date.prototype.getWeek = function() {
-  var d = new Date(
-    Date.UTC(this.getFullYear(), this.getMonth(), this.getDate())
-  );
-  var dayNum = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-  var yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  return Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
-};
+function getNumPrimeiraSemanaMes(timestamp) {
+  date = new Date(timestamp*1000);
+  ano = date.getFullYear();
+  mes = date.getMonth();
+  data = new Date(ano, mes, 1);
+  return data.getWeek();
+}
 
 //Rotas
 app.get('/', function(req, res) {
@@ -78,7 +77,7 @@ app.post('/v1/carros', function(req, res) {
       );
     } else {
       res.status(201);
-      res.send(results);
+      res.end();
     }
   });
 });
@@ -93,11 +92,13 @@ app.get('/v1/estacionamentos', function(req, res) {
   connection.query('SELECT * from tbl_atual', function(error, results, fields) {
     if (error) {
       res.status(400);
-      res.send(JSON.stringify({
-        code: 400,
-        type: 'error',
-        message: error
-      }));
+      res.send(
+        JSON.stringify({
+          code: 400,
+          type: 'error',
+          message: error
+        })
+      );
     } else {
       retorno = [];
       results.forEach(element => {
@@ -125,74 +126,47 @@ app.get('/v1/estacionamentos/:id/findByHour', function(req, res) {
   idEstacionamento = req.params.id;
   timestamp = req.query.timestamp;
 
-  var data = new Date(timestamp * 1000);
-
-  var ano = data.getFullYear();
-  var mes = '0' + (data.getMonth() + 1);
-  var dia = '0' + data.getDate();
-  var dataFormatada = ano + '-' + mes.substr(-2) + '-' + dia.substr(-2);
-
-  var horas = data.getHours();
-  var minutos = '0' + data.getMinutes();
-  var segundos = '0' + data.getSeconds();
-  var tempoFormatado =
-    horas + ':' + minutos.substr(-2) + ':' + segundos.substr(-2);
-
   //identifica estacionamento(0 e 1 são portaria)
   if (idEstacionamento < 2) {
     query =
-      'SELECT timestamp, acao FROM tbl_portaria WHERE idportaria=? AND date(timestamp) = ? AND hour(timestamp) = ?';
+      'SELECT minute(timestamp) as minuto, acao FROM tbl_portaria WHERE idportaria=? AND date(timestamp) = date(FROM_UNIXTIME(?)) AND hour(timestamp) = hour(FROM_UNIXTIME(?))';
   } else {
     query =
-      'SELECT timestamp, acao FROM tbl_bolsao WHERE idbolsao=? AND date(timestamp) = ? AND hour(timestamp) = ?';
+      'SELECT minute(timestamp) as minuto, acao FROM tbl_bolsao WHERE idbolsao=? AND date(timestamp) = date(FROM_UNIXTIME(?)) AND hour(timestamp) = hour(FROM_UNIXTIME(?))';
   }
-  var entrada = [];
-  var saida = [];
-  connection.query(query, [idEstacionamento, dataFormatada, horas], function(
+
+  connection.query(query, [idEstacionamento, timestamp, timestamp], function(
     error,
     results,
     fields
   ) {
     if (error) {
       res.status(400);
-      res.send(JSON.stringify({
-        code: 400,
-        type: 'error',
-        message: error
-      }));
+      res.send(
+        JSON.stringify({
+          code: 400,
+          type: 'error',
+          message: error
+        })
+      );
     } else {
-      //separa em entrada e saida(em minutos)
+      //separa em entrada e saida
+      var entrada = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+      var saida = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
       results.forEach(element => {
-        let ts = new Date(element.timestamp);
-        let minute = ts.getMinutes();
+        let minuto = element.minuto;
 
         if (element.acao == 'entrada') {
-          entrada.push(minute);
+          entrada[Math.floor(minuto / 5)] += 1;
         } else if (element.acao == 'saida') {
-          saida.push(minute);
+          saida[Math.floor(minuto / 5)] += 1;
         }
-      });
-      //filtra array em 12 partes e separa a cada 5 min
-      entrada.sort();
-      saida.sort();
-
-      listaEntrada = [];
-      listaSaida = [];
-
-      lista = [4, 9, 14, 19, 24, 29, 34, 39, 44, 49, 54, 59];
-
-      lista.forEach(element => {
-        listaEntrada.push(
-          entrada.splice(0, LastIndexOfInterval(element, entrada) + 1).length
-        );
-        listaSaida.push(
-          saida.splice(0, LastIndexOfInterval(element, saida) + 1).length
-        );
       });
 
       retorno = {
-        entrada: listaEntrada,
-        saida: listaSaida
+        entrada: entrada,
+        saida: saida
       };
 
       res.status(200);
@@ -211,97 +185,47 @@ app.get('/v1/estacionamentos/:id/findByDay', function(req, res) {
   idEstacionamento = req.params.id;
   timestamp = req.query.timestamp;
 
-  var data = new Date(timestamp * 1000);
-
-  var ano = data.getFullYear();
-  var mes = '0' + (data.getMonth() + 1);
-  var dia = '0' + data.getDate();
-  var dataFormatada = ano + '-' + mes.substr(-2) + '-' + dia.substr(-2);
-
-  var horas = data.getHours();
-  var minutos = '0' + data.getMinutes();
-  var segundos = '0' + data.getSeconds();
-  var tempoFormatado =
-    horas + ':' + minutos.substr(-2) + ':' + segundos.substr(-2);
-
   //identifica estacionamento(0 e 1 são portaria)
   if (idEstacionamento < 2) {
     query =
-      'SELECT timestamp, acao FROM tbl_portaria WHERE idportaria=? AND date(timestamp) = ?';
+      'SELECT hour(timestamp) as hora, acao FROM tbl_portaria WHERE idportaria=? AND date(timestamp) = date(FROM_UNIXTIME(?))';
   } else {
     query =
-      'SELECT timestamp, acao FROM tbl_bolsao WHERE idbolsao=? AND date(timestamp) = ?';
+      'SELECT hour(timestamp) as hora, acao FROM tbl_bolsao WHERE idbolsao=? AND date(timestamp) = date(FROM_UNIXTIME(?))';
   }
-  var entrada = [];
-  var saida = [];
-  connection.query(query, [idEstacionamento, dataFormatada], function(
+
+  connection.query(query, [idEstacionamento, timestamp], function(
     error,
     results,
     fields
   ) {
     if (error) {
       res.status(400);
-      res.send(JSON.stringify({
-        code: 400,
-        type: 'error',
-        message: error
-      }));
+      res.send(
+        JSON.stringify({
+          code: 400,
+          type: 'error',
+          message: error
+        })
+      );
     } else {
       //separa em entrada e saida(em horas)
+      var entrada = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+      var saida = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
       results.forEach(element => {
-        let ts = new Date(element.timestamp);
-        let hora = ts.getHours();
+        let hora = element.hora;
 
         if (element.acao == 'entrada') {
-          entrada.push(hora);
+          entrada[hora] += 1;
         } else if (element.acao == 'saida') {
-          saida.push(hora);
+          saida[hora] += 1;
         }
-      });
-      //filtra array em 12 partes e separa a cada 5 min
-      entrada.sort();
-      saida.sort();
-
-      listaEntrada = [];
-      listaSaida = [];
-
-      lista = [
-        0,
-        1,
-        2,
-        3,
-        4,
-        5,
-        6,
-        7,
-        8,
-        9,
-        10,
-        11,
-        12,
-        13,
-        14,
-        15,
-        16,
-        17,
-        18,
-        19,
-        20,
-        21,
-        22,
-        23
-      ];
-
-      lista.forEach(element => {
-        listaEntrada.push(
-          entrada.splice(0, entrada.lastIndexOf(element) + 1).length
-        );
-        listaSaida.push(saida.splice(0, saida.lastIndexOf(element) + 1).length);
       });
 
       retorno = {
-        entrada: listaEntrada,
-        saida: listaSaida
+        entrada: entrada,
+        saida: saida
       };
 
       res.status(200);
@@ -320,69 +244,59 @@ app.get('/v1/estacionamentos/:id/findByWeek', function(req, res) {
   idEstacionamento = req.params.id;
   timestamp = req.query.timestamp;
 
-  var data = new Date(timestamp * 1000);
-
-  var ano = data.getFullYear();
-  var mes = '0' + (data.getMonth() + 1);
-  var dia = '0' + data.getDate();
-  var dataFormatada = ano + '-' + mes.substr(-2) + '-' + dia.substr(-2);
-
-  var horas = data.getHours();
-  var minutos = '0' + data.getMinutes();
-  var segundos = '0' + data.getSeconds();
-  var tempoFormatado =
-    horas + ':' + minutos.substr(-2) + ':' + segundos.substr(-2);
-
-  //var semana = data.getWeek();
   //identifica estacionamento(0 e 1 são portaria)
   if (idEstacionamento < 2) {
     query =
-      'SELECT hour(timestamp) as hora, acao, dayofweek(timestamp) as diaDaSemana FROM tbl_portaria WHERE idportaria=? AND year(timestamp) = ? and week(timestamp) = week(FROM_UNIXTIME(?))';
+      'SELECT hour(timestamp) as hora, acao, dayofweek(timestamp) as diaDaSemana FROM tbl_portaria WHERE idportaria=? AND year(timestamp) = year(FROM_UNIXTIME(?)) and week(timestamp) = week(FROM_UNIXTIME(?))';
   } else {
     query =
-      'SELECT hour(timestamp) as hora, acao, dayofweek(timestamp) as diaDaSemana FROM tbl_bolsao WHERE idbolsao=? AND year(timestamp) = ? and week(timestamp) = week(FROM_UNIXTIME(?))';
+      'SELECT hour(timestamp) as hora, acao, dayofweek(timestamp) as diaDaSemana FROM tbl_bolsao WHERE idbolsao=? AND year(timestamp) = year(FROM_UNIXTIME(?)) and week(timestamp) = week(FROM_UNIXTIME(?))';
   }
-  var entrada = [
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-  ];
-  var saida = [
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-  ];
-  connection.query(query, [idEstacionamento, ano, timestamp], function(
+
+  connection.query(query, [idEstacionamento, timestamp, timestamp], function(
     error,
     results,
     fields
   ) {
     if (error) {
       res.status(400);
-      res.send(JSON.stringify({
-        code: 400,
-        type: 'error',
-        message: error
-      }));
+      res.send(
+        JSON.stringify({
+          code: 400,
+          type: 'error',
+          message: error
+        })
+      );
     } else {
       //separa em entrada e saida(em horas)
+      var entrada = [
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+      ];
+
+      var saida = [
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+      ];
+
       results.forEach(element => {
-        //let ts = new Date(element.timestamp);
         let diaDaSemana = element.diaDaSemana;
         let hora = element.hora;
 
         if (element.acao == 'entrada') {
-          entrada[diaDaSemana][hora] += 1;
+          entrada[diaDaSemana-1][hora] += 1;
         } else if (element.acao == 'saida') {
-          saida[diaDaSemana][hora] += 1;
+          saida[diaDaSemana-1][hora] += 1;
         }
       });
 
@@ -412,81 +326,104 @@ app.get('/v1/estacionamentos/:id/findByMonth', function(req, res) {
   idEstacionamento = req.params.id;
   timestamp = req.query.timestamp;
 
-  var data = new Date(timestamp * 1000);
-
-  var ano = data.getFullYear();
-  var mes = '0' + (data.getMonth() + 1);
-  var dia = '0' + data.getDate();
-  var dataFormatada = ano + '-' + mes.substr(-2) + '-' + dia.substr(-2);
-
-  var horas = data.getHours();
-  var minutos = '0' + data.getMinutes();
-  var segundos = '0' + data.getSeconds();
-  var tempoFormatado =
-    horas + ':' + minutos.substr(-2) + ':' + segundos.substr(-2);
-
-  //var semana = data.getWeek();
   //identifica estacionamento(0 e 1 são portaria)
   if (idEstacionamento < 2) {
     query =
-      'SELECT hour(timestamp) as hora, acao, dayofweek(timestamp) as diaDaSemana FROM tbl_portaria WHERE idportaria=? AND year(timestamp) = ? and week(timestamp) = week(FROM_UNIXTIME(?))';
+      'SELECT week(timestamp) as semanaDoAno, hour(timestamp) as hora, acao, dayofweek(timestamp) as diaDaSemana FROM tbl_portaria WHERE idportaria=? AND year(timestamp) = year(FROM_UNIXTIME(?)) and month(timestamp) = month(FROM_UNIXTIME(?))';
   } else {
     query =
-      'SELECT hour(timestamp) as hora, acao, dayofweek(timestamp) as diaDaSemana FROM tbl_bolsao WHERE idbolsao=? AND year(timestamp) = ? and week(timestamp) = week(FROM_UNIXTIME(?))';
+      'SELECT week(timestamp) as semanaDoAno, hour(timestamp) as hora, acao, dayofweek(timestamp) as diaDaSemana FROM tbl_bolsao WHERE idbolsao=? AND year(timestamp) = year(FROM_UNIXTIME(?)) and month(timestamp) = month(FROM_UNIXTIME(?))';
   }
-  var entrada = [
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-  ];
-  var saida = [
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-  ];
-  connection.query(query, [idEstacionamento, ano, timestamp], function(
+
+  connection.query(query, [idEstacionamento, timestamp, timestamp], function(
     error,
     results,
     fields
   ) {
     if (error) {
       res.status(400);
-      res.send(JSON.stringify({
-        code: 400,
-        type: 'error',
-        message: error
-      }));
+      res.send(
+        JSON.stringify({
+          code: 400,
+          type: 'error',
+          message: error
+        })
+      );
     } else {
       //separa em entrada e saida(em horas)
+      var entrada = [[[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]], [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]], [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]], [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]], [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]], [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]];
+      var saida = [[[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]], [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]], [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]], [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]], [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]], [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]];
+      
+      //ACHA SEMANA MINIMA DO MES DADO
+      var semanaMinima = getNumPrimeiraSemanaMes(timestamp);
+
       results.forEach(element => {
-        //let ts = new Date(element.timestamp);
-        //TODO - ACHAR SEMANA MINIMA week()
+        let semanaDoMes = element.semanaDoAno - semanaMinima + 1;
         let diaDaSemana = element.diaDaSemana;
         let hora = element.hora;
 
         if (element.acao == 'entrada') {
-          entrada[diaDaSemana][hora] += 1;
+          entrada[semanaDoMes][diaDaSemana-1][hora] += 1;
         } else if (element.acao == 'saida') {
-          saida[diaDaSemana][hora] += 1;
+          saida[semanaDoMes][diaDaSemana-1][hora] += 1;
         }
       });
 
       retorno = {
-        segunda: { entrada: entrada[1], saida: saida[1] },
-        terca: { entrada: entrada[2], saida: saida[2] },
-        quarta: { entrada: entrada[3], saida: saida[3] },
-        quinta: { entrada: entrada[4], saida: saida[4] },
-        sexta: { entrada: entrada[5], saida: saida[5] },
-        sabado: { entrada: entrada[6], saida: saida[6] },
-        domingo: { entrada: entrada[0], saida: saida[0] }
+        1: {
+          segunda: { entrada: entrada[0][1], saida: saida[0][1] },
+          terca: { entrada: entrada[0][2], saida: saida[0][2] },
+          quarta: { entrada: entrada[0][3], saida: saida[0][3] },
+          quinta: { entrada: entrada[0][4], saida: saida[0][4] },
+          sexta: { entrada: entrada[0][5], saida: saida[0][5] },
+          sabado: { entrada: entrada[0][6], saida: saida[0][6] },
+          domingo: { entrada: entrada[0][0], saida: saida[0][0] }
+        },
+        2: {
+          segunda: { entrada: entrada[1][1], saida: saida[1][1] },
+          terca: { entrada: entrada[1][2], saida: saida[1][2] },
+          quarta: { entrada: entrada[1][3], saida: saida[1][3] },
+          quinta: { entrada: entrada[1][4], saida: saida[1][4] },
+          sexta: { entrada: entrada[1][5], saida: saida[1][5] },
+          sabado: { entrada: entrada[1][6], saida: saida[1][6] },
+          domingo: { entrada: entrada[1][0], saida: saida[1][0] }
+        },
+        3: {
+          segunda: { entrada: entrada[2][1], saida: saida[2][1] },
+          terca: { entrada: entrada[2][2], saida: saida[2][2] },
+          quarta: { entrada: entrada[2][3], saida: saida[2][3] },
+          quinta: { entrada: entrada[2][4], saida: saida[2][4] },
+          sexta: { entrada: entrada[2][5], saida: saida[2][5] },
+          sabado: { entrada: entrada[2][6], saida: saida[2][6] },
+          domingo: { entrada: entrada[2][0], saida: saida[2][0] }
+        },
+        4: {
+          segunda: { entrada: entrada[3][1], saida: saida[3][1] },
+          terca: { entrada: entrada[3][2], saida: saida[3][2] },
+          quarta: { entrada: entrada[3][3], saida: saida[3][3] },
+          quinta: { entrada: entrada[3][4], saida: saida[3][4] },
+          sexta: { entrada: entrada[3][5], saida: saida[3][5] },
+          sabado: { entrada: entrada[3][6], saida: saida[3][6] },
+          domingo: { entrada: entrada[3][0], saida: saida[3][0] }
+        },
+        5: {
+          segunda: { entrada: entrada[4][1], saida: saida[4][1] },
+          terca: { entrada: entrada[4][2], saida: saida[4][2] },
+          quarta: { entrada: entrada[4][3], saida: saida[4][3] },
+          quinta: { entrada: entrada[4][4], saida: saida[4][4] },
+          sexta: { entrada: entrada[4][5], saida: saida[4][5] },
+          sabado: { entrada: entrada[4][6], saida: saida[4][6] },
+          domingo: { entrada: entrada[4][0], saida: saida[4][0] }
+        },
+        6: {
+          segunda: { entrada: entrada[5][1], saida: saida[5][1] },
+          terca: { entrada: entrada[5][2], saida: saida[5][2] },
+          quarta: { entrada: entrada[5][3], saida: saida[5][3] },
+          quinta: { entrada: entrada[5][4], saida: saida[5][4] },
+          sexta: { entrada: entrada[5][5], saida: saida[5][5] },
+          sabado: { entrada: entrada[5][6], saida: saida[5][6] },
+          domingo: { entrada: entrada[5][0], saida: saida[5][0] }
+        }
       };
 
       res.status(200);
@@ -495,5 +432,5 @@ app.get('/v1/estacionamentos/:id/findByMonth', function(req, res) {
   });
 });
 
-var server = app.listen(3000);
+var server = app.listen(port);
 console.log('Servidor Express iniciado na porta %s', server.address().port);
