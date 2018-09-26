@@ -1,0 +1,5 @@
+nome do servido:smartparkingmaua
+admin logon:adminspm
+senha:Smartparkingmaua123
+
+177.9.161.15

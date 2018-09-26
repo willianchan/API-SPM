@@ -7,14 +7,15 @@ const port = 8080;
 const app = express();
 app.use(bodyParser.json());
 
-//Database connection
-var connection = mysql.createConnection({
-  host: 'localhost',
-  user: 'root',
-  password: '',
-  database: 'mydb'
+//Conexao pool ao db
+const pool = mysql.createPool({
+  connectionLimit: 100,
+  host: 'smartparkingmaua.mysql.database.azure.com',
+  user: 'adminspm@smartparkingmaua',
+  password: 'Smartparkingmaua123',
+  database: 'smartparkingmaua',
+  debug: false
 });
-connection.connect();
 
 //FUNCOES
 Date.prototype.getWeek = function() {
@@ -60,8 +61,8 @@ app.post('/v1/carros', function(req, res) {
     query =
       'INSERT INTO tbl_bolsao (idbolsao, timestamp, acao) VALUES (?, FROM_UNIXTIME(?), ?)';
   }
-
-  connection.query(query, [idEstacionamento, timestamp, estado], function(
+  
+  pool.query(query, [idEstacionamento, timestamp, estado], function(
     error,
     results,
     fields
@@ -89,7 +90,7 @@ app.post('/v1/carros', function(req, res) {
  * Output-Formats: [application/json]
  */
 app.get('/v1/estacionamentos', function(req, res) {
-  connection.query('SELECT * from tbl_atual', function(error, results, fields) {
+  pool.query('SELECT * from tbl_atual', function(error, results, fields) {
     if (error) {
       res.status(400);
       res.send(
@@ -135,7 +136,7 @@ app.get('/v1/estacionamentos/:id/findByHour', function(req, res) {
       'SELECT minute(timestamp) as minuto, acao FROM tbl_bolsao WHERE idbolsao=? AND date(timestamp) = date(FROM_UNIXTIME(?)) AND hour(timestamp) = hour(FROM_UNIXTIME(?))';
   }
 
-  connection.query(query, [idEstacionamento, timestamp, timestamp], function(
+  pool.query(query, [idEstacionamento, timestamp, timestamp], function(
     error,
     results,
     fields
@@ -194,7 +195,7 @@ app.get('/v1/estacionamentos/:id/findByDay', function(req, res) {
       'SELECT hour(timestamp) as hora, acao FROM tbl_bolsao WHERE idbolsao=? AND date(timestamp) = date(FROM_UNIXTIME(?))';
   }
 
-  connection.query(query, [idEstacionamento, timestamp], function(
+  pool.query(query, [idEstacionamento, timestamp], function(
     error,
     results,
     fields
@@ -253,7 +254,7 @@ app.get('/v1/estacionamentos/:id/findByWeek', function(req, res) {
       'SELECT hour(timestamp) as hora, acao, dayofweek(timestamp) as diaDaSemana FROM tbl_bolsao WHERE idbolsao=? AND year(timestamp) = year(FROM_UNIXTIME(?)) and week(timestamp) = week(FROM_UNIXTIME(?))';
   }
 
-  connection.query(query, [idEstacionamento, timestamp, timestamp], function(
+  pool.query(query, [idEstacionamento, timestamp, timestamp], function(
     error,
     results,
     fields
@@ -335,7 +336,7 @@ app.get('/v1/estacionamentos/:id/findByMonth', function(req, res) {
       'SELECT week(timestamp) as semanaDoAno, hour(timestamp) as hora, acao, dayofweek(timestamp) as diaDaSemana FROM tbl_bolsao WHERE idbolsao=? AND year(timestamp) = year(FROM_UNIXTIME(?)) and month(timestamp) = month(FROM_UNIXTIME(?))';
   }
 
-  connection.query(query, [idEstacionamento, timestamp, timestamp], function(
+  pool.query(query, [idEstacionamento, timestamp, timestamp], function(
     error,
     results,
     fields
